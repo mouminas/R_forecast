@@ -1,0 +1,481 @@
+### clear the space
+cat("\014");
+rm(list = ls(all.names = TRUE))
+
+
+### Install Packages
+
+# install.packages("dplyr")
+# install.packages("ggplot")
+# install.packages("tidyverse")
+# install.packages("stargazer")
+# install.packages("readxl")
+# install.packages("DataCombine")
+# install.packages("tseries")
+# install.packages("caret")
+# install.packages("vars")
+# install.packages("forecast")
+# install.packages("lightgbm", repos = "https://cran.r-project.org", type = "source")
+# install.packages("writexl")
+# install.packages("tsibble")
+# install.packages("lubridate")
+# install.packages("ggplot2")
+# install.packages("patchwork")
+# install.packages("plm")
+
+### Load the package
+
+library(lightgbm)
+library(forecast)
+library(tidyr)
+library(dplyr)
+library(DataCombine)
+library(tseries)
+library(caret)
+library(readxl)
+library(vars)
+library(writexl)
+library(tsibble)
+library(lubridate)
+library(ggplot2)
+library(fable)
+library(feasts)
+library(patchwork)
+library(plm)        # panel regression
+library(car)        # linearHypothesis for joint tests
+library(stringr)
+
+### Loading the data
+
+## Data uploading 
+
+# Monthly
+m_secu <- read_excel("C:/Users/AbdelmoumineT105/OneDrive - Washington State Executive Branch Agencies/Desktop/2024 -mid 2025/R_DFI/Securities Forecast/Jun_2026_forecast/Actuals.xlsx", sheet = 1) 
+q_exogenous_US <- read_excel("C:/Users/AbdelmoumineT105/OneDrive - Washington State Executive Branch Agencies/Desktop/2024 -mid 2025/R_DFI/Securities Forecast/Jun_2026_forecast/BC0526.xlsx", sheet = 1, skip = 1) 
+q_exogenous_WA <- read_excel("C:/Users/AbdelmoumineT105/OneDrive - Washington State Executive Branch Agencies/Desktop/2024 -mid 2025/R_DFI/Securities Forecast/Jun_2026_forecast/BC0526W.xlsx", sheet = 1, skip=1) 
+
+colnames(q_exogenous_US)[1] <- "date"
+colnames(q_exogenous_WA)[1] <- "date"
+
+q_exogenous_US <- mutate(q_exogenous_US,Year= substr(date,1,4))
+q_exogenous_US <- mutate(q_exogenous_US,Quarter= substr(date,6,7))
+q_exogenous_US <- mutate(q_exogenous_US,Quarter= ifelse(Quarter=="01","Q1",ifelse(Quarter=="04","Q2",ifelse(Quarter=="07","Q3",ifelse(Quarter=="10","Q4",Quarter)))))
+q_exogenous_US <- mutate(q_exogenous_US,`Year:Quarter`= paste(Year,Quarter,sep=":"))
+
+q_exogenous_WA <- mutate(q_exogenous_WA,Year= substr(date,1,4))
+q_exogenous_WA <- mutate(q_exogenous_WA,Quarter= substr(date,6,7))
+q_exogenous_WA <- mutate(q_exogenous_WA,Quarter= ifelse(Quarter=="01","Q1",ifelse(Quarter=="04","Q2",ifelse(Quarter=="07","Q3",ifelse(Quarter=="10","Q4",Quarter)))))
+q_exogenous_WA <- mutate(q_exogenous_WA,`Year:Quarter`= paste(Year,Quarter,sep=":"))
+
+
+#  Quarterly
+q_secu <- m_secu %>% group_by(`Year:Quarter`) %>% summarise(`Total Registrations` = sum(`Total Registrations`), `Total Exemptions & Opinions` = sum(`Total Exemptions & Opinions`), 
+                                                            `Total Licensing` = sum(`Total Licensing`),`Total Fran. & Bus Op.` = sum(`Total Fran. & Bus Op.`),`Total Revenue` = sum(`Total Registrations`,`Total Exemptions & Opinions`,`Total Licensing`,`Total Fran. & Bus Op.`))
+data <- merge(q_secu,q_exogenous_US, by= "Year:Quarter", all=TRUE)
+data <- merge(data,q_exogenous_WA, by= "Year:Quarter", all=TRUE)
+
+clean_colnames <- gsub("[^[:alnum:]_]", "_", colnames(data))
+colnames(data) <- clean_colnames
+
+
+### Actual Plots
+
+data <- data %>%
+  mutate(
+    Year_Quarter = as.yearqtr(Year_Quarter, format = "%Y:Q%q"),
+    year    = as.integer(format(Year_Quarter, "%Y")),
+    quarter = as.integer(cycle(Year_Quarter))
+  )
+
+
+data_clean <-  data %>% drop_na(Total_Revenue)
+
+### Selecting the forecasting approach
+
+# Get critical points in the dataset
+
+first_row_non_na <- which(!is.na(data$Total_Revenue))[1]
+last_row_actual = first_row_non_na + nrow(na.omit(data.frame(data$Total_Revenue))) -1 
+last_row_forecast <- nrow(data)
+
+
+ts_tot_rev_data <- ts(data$Total_Revenue[first_row_non_na:last_row_actual], frequency = 4)  # quarterly
+
+#decomp <- stl(ts_tot_rev_data/ 1e6, s.window = "periodic")
+decomp <- stl(ts_tot_rev_data, s.window = "periodic")
+
+
+data_sub <- data[first_row_non_na:last_row_actual,]
+row.names(data_sub) <- NULL
+data_sub$tot_rev_trend <- decomp$time.series[, "trend"]
+data_sub$tot_rev_seasonal <- decomp$time.series[, "seasonal"]
+data_sub$tot_rev_remainder <- decomp$time.series[, "remainder"]
+
+data_sub$quarter <- str_sub(data_sub$Year_Quarter, -1)
+
+data_sub$quarter <- as.factor(data_sub$quarter)
+
+data_sub$tot_rev_trend <- as.numeric(data_sub$tot_rev_trend, format = "%Y Q%q")
+
+a <- as.data.frame(data_sub$tot_rev_trend)
+#bp <- breakpoints(Total_Revenue ~ 1, data = data_sub)
+
+#bp <- breakpoints(Total_Revenue ~ tot_rev_trend, data = data_sub)
+
+bp <- breakpoints(Total_Revenue ~ tot_rev_trend + quarter, data = data_sub)
+
+summary(bp)
+
+# Make the plotting device larger first
+plot(bp)
+
+bp$breakpoints
+
+data_sub$Year_Quarter[breakpoints(bp)$breakpoints]
+
+break_df <- data.frame(date = data_sub$Year_Quarter[bp$breakpoints])
+
+class(data_sub$Year_Quarter)
+class(break_df$date) 
+
+data_sub$Year_Quarter <- as.yearqtr(data_sub$Year_Quarter, format = "%Y Q%q")
+break_df$date <- as.yearqtr(break_df$date)
+
+## covid spending https://www.nlc.org/article/2025/03/13/cities-and-towns-navigate-the-2026-slfrf-spending-deadline
+
+## Let's forecast
+
+last_break_row <- tail(bp$breakpoints,1)
+
+first_row_non_na_sub <- which(!is.na(data_sub$Total_Revenue))[1]
+last_row_actual_sub = first_row_non_na_sub + nrow(na.omit(data.frame(data_sub$Total_Revenue))) -1 
+
+data_sub_final <- data_sub[last_break_row:last_row_actual_sub,]
+row.names(data_sub) <- NULL
+
+forecast_tab <- as.data.frame(data_sub_final$Year_Quarter)
+colnames(forecast_tab)[1] <-"Year_Quarter"
+forecast_tab$Actual <- data_sub_final$Total_Revenue
+colnames(forecast_tab)[2] <-"Actual_Total_Revenue"
+
+# rule of thumb (sales_ratio)
+
+forecast_tab_sales <- forecast_tab[,c(1,2)]
+
+## Let's compute the sales_ratio
+
+forecast_tab_sales <- forecast_tab_sales %>% mutate(Year = substr(Year_Quarter, 1, 4), Quarter = substr(Year_Quarter, 6, 7))
+
+forecast_tab_sales <- forecast_tab_sales %>%
+  group_by(Year) %>%
+  mutate(annual_total = sum(Actual_Total_Revenue, na.rm = TRUE),
+         sales_ratio = Actual_Total_Revenue / annual_total
+  ) %>% ungroup()
+
+forecast_tab_annual <- forecast_tab_sales %>%
+  group_by(Year) %>%
+  summarise(
+    Annual_Revenue = sum(Actual_Total_Revenue, na.rm = TRUE)
+  )
+
+#Forecast next year
+
+# Step 3: keep last 2 years
+last_2_years <- forecast_tab_sales %>% filter(Year<2026) %>% filter(Year %in% tail(sort(unique(Year)), 2))
+
+# Step 4: average ratio per quarter
+avg_ratio <- last_2_years %>%
+  group_by(Quarter) %>%
+  summarise(Avg_Sales_Ratio = mean(sales_ratio))
+
+forecast_tab_sales$sales_ratio_forecast <- forecast_tab_sales$sales_ratio
+
+forecast_tab_sales$sales_ratio_forecast <- avg_ratio$Avg_Sales_Ratio[
+  match(forecast_tab_sales$Quarter, avg_ratio$Quarter)
+]
+
+# rule of thumb (cumulative_sales_ratio)
+
+forecast_tab_sales <- forecast_tab_sales %>%
+  arrange(Year, Quarter) %>%   # ensure correct order
+  group_by(Year) %>%
+  mutate(cum_sales_ratio = cumsum(sales_ratio)) %>%
+  ungroup()
+
+# Step 3: keep last 2 years
+last_2_years <- forecast_tab_sales %>% filter(Year<2026) %>% filter(Year %in% tail(sort(unique(Year)), 2))
+
+# Step 4: average ratio per quarter
+avg_cum_ratio <- last_2_years %>%
+  group_by(Quarter) %>%
+  summarise(avg_cum_sales_ratio = mean(cum_sales_ratio))
+
+forecast_tab_sales$cum_sales_ratio_forecast <- forecast_tab_sales$cum_sales_ratio
+
+forecast_tab_sales$cum_sales_ratio_forecast <- avg_cum_ratio$avg_cum_sales_ratio[
+  match(forecast_tab_sales$Quarter, avg_cum_ratio$Quarter)
+]
+
+
+### cum_sales
+
+forecast_tab_sales <- forecast_tab_sales %>%
+  arrange(Year, Quarter) %>%   # ensure correct order
+  group_by(Year) %>%
+  mutate(cum_sales = cumsum(Actual_Total_Revenue)) %>%
+  ungroup()
+
+forecast_tab_annual[7,2] <- forecast_tab_sales[25,10]/forecast_tab_sales[25,9]
+
+n_obs <- nrow(forecast_tab_annual)
+
+if (n_obs %% 2 == 0) {
+  trend <- seq(from = -(n_obs - 1), to = (n_obs - 1), by = 2)
+} else {
+  trend <- seq(from = -(n_obs - 1)/2, to = (n_obs - 1)/2, by = 1)
+}
+
+forecast_tab_annual$trend_centered <- trend
+
+model <- lm(Annual_Revenue ~ trend_centered, data = forecast_tab_annual)
+
+#forecast_steps <- as.numeric(substr(data$Year_Quarter[last_row_forecast],1,4)) - (as.numeric(substr(data$Year_Quarter[last_row_actual],1,4))+1) +1
+forecast_steps <-5
+forecast_tab_annual$Year <- as.numeric(forecast_tab_annual$Year)
+forecast_tab_annual_future <- as.data.frame(matrix(0, nrow = 5, ncol = 3))
+colnames(forecast_tab_annual_future) <- colnames(forecast_tab_annual)
+forecast_tab_annual <- rbind(forecast_tab_annual,forecast_tab_annual_future)
+
+coeffmodel <- coef(model)
+
+for (i in n_obs:(n_obs+forecast_steps-1)){
+  forecast_tab_annual$Year[i+1] <-  forecast_tab_annual$Year[i]+1
+  if (n_obs %% 2 == 0) {
+  forecast_tab_annual$trend_centered[i+1] <- forecast_tab_annual$trend_centered[i] + 2
+  } else {
+  forecast_tab_annual$trend_centered[i+1] <- forecast_tab_annual$trend_centered[i] + 1
+  }
+  forecast_tab_annual$Annual_Revenue[i+1] <- coeffmodel[1] +coeffmodel[2]*forecast_tab_annual$trend_centered[i+1]
+}
+
+
+#forecast_tab_sales_future <- as.data.frame(matrix(0, nrow = 12, ncol = 6))
+#colnames(forecast_tab_sales_future) <- colnames(forecast_tab_sales)
+#forecast_tab_sales <- rbind(forecast_tab_sales,forecast_tab_sales_future)
+
+forecast_tab_sales$annual_total_forecast <- forecast_tab_annual$Annual_Revenue[
+  match(forecast_tab_sales$Year, forecast_tab_annual$Year)
+]
+
+forecast_tab_sales$Year <- as.numeric(forecast_tab_sales$Year)
+
+
+forecast_tab_sales$Total_Revenue_forecast <- forecast_tab_sales$annual_total_forecast * forecast_tab_sales$sales_ratio_forecast
+
+forecast_tab_sales$Total_Revenue_forecast[1:25] <- forecast_tab_sales$Actual_Total_Revenue[1:25] 
+
+
+
+forecast_tab_sales_ext<- as.data.frame(matrix(0, nrow = 23, ncol = 12))
+colnames(forecast_tab_sales_ext) <- colnames(forecast_tab_sales)
+forecast_tab_sales <- rbind(forecast_tab_sales,forecast_tab_sales_ext)
+
+full_quarters <- data.frame(
+  year_quarter = seq(
+    from = max(forecast_tab_sales$Year_Quarter),
+    to = as.yearqtr("2031 Q4", format = "%Y Q%q"),
+    by = 1/4
+  )
+)
+forecast_tab_sales[26:48,1] <- full_quarters[2:24,1]
+
+forecast_tab_sales <- forecast_tab_sales %>%
+  mutate(Year = as.numeric(format(Year_Quarter, "%Y")),
+         Quarter = factor(
+           paste0("Q", format(Year_Quarter, "%q")),
+           levels = c("Q1", "Q2", "Q3", "Q4")))
+
+forecast_tab_sales$annual_total_forecast <- forecast_tab_annual$Annual_Revenue[
+  match(forecast_tab_sales$Year, forecast_tab_annual$Year)
+]
+
+
+forecast_tab_sales$cum_sales_ratio_forecast <- avg_cum_ratio$avg_cum_sales_ratio[
+  match(forecast_tab_sales$Quarter, avg_cum_ratio$Quarter)
+]
+
+
+for (i in 26:48){
+  if ( forecast_tab_sales$Quarter[i] != "Q1") {
+  forecast_tab_sales$Total_Revenue_forecast[i] = forecast_tab_sales$annual_total_forecast[i]*forecast_tab_sales$cum_sales_ratio_forecast[i] - forecast_tab_sales$annual_total_forecast[i-1]*forecast_tab_sales$cum_sales_ratio_forecast[i-1]
+  }
+  else{
+    forecast_tab_sales$Total_Revenue_forecast[i] = forecast_tab_sales$annual_total_forecast[i]*forecast_tab_sales$cum_sales_ratio_forecast[i]
+  }
+}
+forecast_tab_ext <- as.data.frame(matrix(0, nrow = 23, ncol = 2))
+colnames(forecast_tab_ext) <- colnames(forecast_tab)
+forecast_tab <- rbind(forecast_tab,forecast_tab_ext)
+
+forecast_tab$avg_sales_ratio <- forecast_tab_sales$Total_Revenue_forecast
+forecast_tab[26:48,1] <- forecast_tab_sales$Year_Quarter[26:48]
+
+
+# multiple regression model
+
+## Let's identify the best model
+
+
+data$quarter <- str_sub(data$Year_Quarter, -1)
+
+data$quarter <- as.factor(data$quarter)
+
+data$dummy_break <- 0
+
+data$dummy_break[214] <- 1
+
+data$dummy_break[244] <- 1
+
+data$dummy_break[293] <- 1
+
+data_sub_forecast <-  data %>% drop_na(Total_Revenue)
+
+data_sub_forecast <- data_sub_forecast %>% filter(year<2026)
+
+multi_reg <- lm(Total_Revenue ~ wl5000 + yp_wa+ csvfinfee + savper + lcbcai + dummy_break+ factor(quarter), data=data_sub_forecast)
+
+summary(multi_reg)
+
+future_data_sub <- data[,c("wl5000","yp_wa","csvfinfee","savper","lcbcai","dummy_break","quarter")]
+
+future_data_sub <-future_data_sub[318:340,]
+
+forecast <- predict(multi_reg, newdata = future_data_sub)
+
+data$multireg_Total_Revenue <- data$Total_Revenue
+
+data$multireg_Total_Revenue[318:340] <- forecast
+
+forecast_tab$multi_reg <- data$multireg_Total_Revenue[293:340]
+
+forecast_tab$avg <- 0.5*forecast_tab$multi_reg + 0.5*forecast_tab$avg_sales_ratio
+
+# Sales ratio by products 
+
+data <- data %>%
+  mutate(
+    ratio_reg = Total_Registrations /Total_Revenue,
+    ratio_exemp = Total_Exemptions___Opinions / Total_Revenue,
+    ratio_licens = Total_Licensing / Total_Revenue,
+    ratio_franch = Total_Fran____Bus_Op_ /Total_Revenue
+  )
+
+data$Quarter <- data$Quarter_y
+
+# Step 3: keep last 2 years
+last_2_years <- data %>% filter(year<2026) %>% filter(year %in% tail(sort(unique(year)), 2))
+
+# Step 4: average ratio per quarter
+avg_ratio <- last_2_years %>%
+  group_by(Quarter) %>%
+  summarise(avg_ratio_reg = mean(ratio_reg),avg_ratio_exemp = mean(ratio_exemp),avg_ratio_licens = mean(ratio_licens),avg_ratio_franch = mean(ratio_franch))
+
+data$sales_ratio_reg_forecast <- avg_ratio$avg_ratio_reg[
+  match(data$Quarter, avg_ratio$Quarter)
+]
+
+data$sales_ratio_exemp_forecast <- avg_ratio$avg_ratio_exemp[
+  match(data$Quarter, avg_ratio$Quarter)
+]
+
+data$sales_ratio_licens_forecast <- avg_ratio$avg_ratio_licens[
+  match(data$Quarter, avg_ratio$Quarter)
+]
+
+data$sales_ratio_franch_forecast <- avg_ratio$avg_ratio_franch[
+  match(data$Quarter, avg_ratio$Quarter)
+]
+
+data$Total_Revenue[318:340] <- forecast_tab$avg[26:48]
+
+data$Total_Registrations[318:340] <- data$Total_Revenue[318:340] * data$sales_ratio_reg_forecast[318:340]
+
+data$Total_Exemptions___Opinions[318:340] <- data$Total_Revenue[318:340] * data$sales_ratio_exemp_forecast[318:340]
+
+data$Total_Licensing[318:340] <- data$Total_Revenue[318:340] * data$sales_ratio_licens_forecast[318:340]
+
+data$Total_Fran____Bus_Op_[318:340] <- data$Total_Revenue[318:340] * data$sales_ratio_franch_forecast[318:340]
+
+
+### fiscal year
+
+data <- mutate(data, C_Year= year)
+data <- mutate(data,F_Year= ifelse(quarter ==1|quarter == 2, C_Year,C_Year+1))
+data <- mutate(data,F_quarter= ifelse(quarter ==1,3,""))
+data <- mutate(data,F_quarter= ifelse(quarter ==2,4,F_quarter))
+data <- mutate(data,F_quarter= ifelse(quarter ==3,1,F_quarter))
+data <- mutate(data,F_quarter= ifelse(quarter ==4,2,F_quarter))
+
+data_final <- data
+
+data_drivers <- data_final[,c("F_Year","F_quarter","wl5000","yp_wa","csvfinfee","savper","lcbcai","dummy_break","quarter")]
+
+Total_Revenue_by_F_year <- data %>% group_by(F_Year) %>% summarise(Total_Revenue = sum(Total_Revenue))
+
+write_xlsx(data_final,"C:/Users/AbdelmoumineT105/OneDrive - Washington State Executive Branch Agencies/Desktop/2024 -mid 2025/R_DFI/Securities Forecast/Jun_2026_forecast/data_final.xlsx")
+write_xlsx(data_drivers,"C:/Users/AbdelmoumineT105/OneDrive - Washington State Executive Branch Agencies/Desktop/2024 -mid 2025/R_DFI/Securities Forecast/Jun_2026_forecast/data_drivers.xlsx")
+
+### Loading the data past quarter
+
+## Data uploading 
+
+# Monthly
+m_secu <- read_excel("C:/Users/AbdelmoumineT105/OneDrive - Washington State Executive Branch Agencies/Desktop/2024 -mid 2025/R_DFI/Securities Forecast/Feb_2026_forecast/Actuals.xlsx", sheet = 1) 
+q_exogenous_US <- read_excel("C:/Users/AbdelmoumineT105/OneDrive - Washington State Executive Branch Agencies/Desktop/2024 -mid 2025/R_DFI/Securities Forecast/Feb_2026_forecast/BC0126.xlsx", sheet = 1, skip = 1) 
+q_exogenous_WA <- read_excel("C:/Users/AbdelmoumineT105/OneDrive - Washington State Executive Branch Agencies/Desktop/2024 -mid 2025/R_DFI/Securities Forecast/Feb_2026_forecast/BC0126W.xlsx", sheet = 1, skip=1) 
+
+colnames(q_exogenous_US)[1] <- "date"
+colnames(q_exogenous_WA)[1] <- "date"
+
+q_exogenous_US <- mutate(q_exogenous_US,Year= substr(date,1,4))
+q_exogenous_US <- mutate(q_exogenous_US,Quarter= substr(date,6,7))
+q_exogenous_US <- mutate(q_exogenous_US,Quarter= ifelse(Quarter=="01","Q1",ifelse(Quarter=="04","Q2",ifelse(Quarter=="07","Q3",ifelse(Quarter=="10","Q4",Quarter)))))
+q_exogenous_US <- mutate(q_exogenous_US,`Year:Quarter`= paste(Year,Quarter,sep=":"))
+
+q_exogenous_WA <- mutate(q_exogenous_WA,Year= substr(date,1,4))
+q_exogenous_WA <- mutate(q_exogenous_WA,Quarter= substr(date,6,7))
+q_exogenous_WA <- mutate(q_exogenous_WA,Quarter= ifelse(Quarter=="01","Q1",ifelse(Quarter=="04","Q2",ifelse(Quarter=="07","Q3",ifelse(Quarter=="10","Q4",Quarter)))))
+q_exogenous_WA <- mutate(q_exogenous_WA,`Year:Quarter`= paste(Year,Quarter,sep=":"))
+
+
+#  Quarterly
+q_secu <- m_secu %>% group_by(`Year:Quarter`) %>% summarise(`Total Registrations` = sum(`Total Registrations`), `Total Exemptions & Opinions` = sum(`Total Exemptions & Opinions`), 
+                                                            `Total Licensing` = sum(`Total Licensing`),`Total Fran. & Bus Op.` = sum(`Total Fran. & Bus Op.`),`Total Revenue` = sum(`Total Registrations`,`Total Exemptions & Opinions`,`Total Licensing`,`Total Fran. & Bus Op.`))
+data <- merge(q_secu,q_exogenous_US, by= "Year:Quarter", all=TRUE)
+data <- merge(data,q_exogenous_WA, by= "Year:Quarter", all=TRUE)
+
+clean_colnames <- gsub("[^[:alnum:]_]", "_", colnames(data))
+colnames(data) <- clean_colnames
+
+data <- data %>%
+  mutate(
+    Year_Quarter = as.yearqtr(Year_Quarter, format = "%Y:Q%q"),
+    year    = as.integer(format(Year_Quarter, "%Y")),
+    quarter = as.integer(cycle(Year_Quarter))
+  )
+
+### fiscal year
+
+data <- mutate(data, C_Year= year)
+data <- mutate(data,F_Year= ifelse(quarter ==1|quarter == 2, C_Year,C_Year+1))
+data <- mutate(data,F_quarter= ifelse(quarter ==1,3,""))
+data <- mutate(data,F_quarter= ifelse(quarter ==2,4,F_quarter))
+data <- mutate(data,F_quarter= ifelse(quarter ==3,1,F_quarter))
+data <- mutate(data,F_quarter= ifelse(quarter ==4,2,F_quarter))
+
+data_final_old <- data
+
+data_drivers_old <- data_final_old[,c("F_Year","F_quarter","wl5000","yp_wa","csvfinfee","savper","lcbcai","quarter")]
+
+write_xlsx(data_drivers_old,"C:/Users/AbdelmoumineT105/OneDrive - Washington State Executive Branch Agencies/Desktop/2024 -mid 2025/R_DFI/Securities Forecast/Jun_2026_forecast/data_drivers_old.xlsx")
+
