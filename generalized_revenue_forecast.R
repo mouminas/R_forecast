@@ -24,6 +24,8 @@
 #      dummies; predict over the future quarters (drivers must extend
 #      through the forecast horizon, as the ERFC files do).
 #   5. Final forecast = weighted average of A and B (default 50/50).
+#      Either method can be switched off via `methods`; with a single
+#      active method, that method alone is the final forecast.
 #   6. Allocate the total to component series (products) using average
 #      component shares per quarter over the last N complete years.
 #   7. Add fiscal-year labels, roll up, and export.
@@ -98,7 +100,14 @@ if (!exists("config")) config <- list(
   # sales ratios and the component shares (original code used 2).
   n_ratio_years = 2,
 
+  # Which forecasting methods to run: "sales_ratio", "multi_reg", or both.
+  # With both, the final forecast is the weighted average below; with a
+  # single method, that method alone IS the final forecast.
+  # (driver_vars is only required when "multi_reg" is active.)
+  methods = c("sales_ratio", "multi_reg"),
+
   # Ensemble weights: final = w * sales-ratio method + (1-w) * regression
+  # (only used when both methods are active)
   weight_sales_ratio = 0.5,
 
   # Quarter (calendar) in which the fiscal year starts: 3 = July (WA state).
@@ -218,6 +227,19 @@ exo_list <- lapply(config$exogenous_files, function(e)
 actuals_freq <- if (!is.null(config$actuals_frequency))
   config$actuals_frequency else "monthly"
 
+# Which methods to run (default: both, the original behavior)
+methods <- if (!is.null(config$methods))
+  config$methods else c("sales_ratio", "multi_reg")
+if (length(methods) == 0 || !all(methods %in% c("sales_ratio", "multi_reg"))) {
+  stop('methods must be "sales_ratio", "multi_reg", or both')
+}
+run_sales_ratio <- "sales_ratio" %in% methods
+run_multi_reg   <- "multi_reg"   %in% methods
+if (run_multi_reg && length(config$driver_vars) == 0) {
+  stop('the "multi_reg" method needs driver_vars; either supply drivers or ',
+       'set methods = "sales_ratio"')
+}
+
 q_actuals <- aggregate_actuals(m_actuals, config$component_cols,
                                config$target_col, actuals_freq)
 data      <- build_quarterly_data(q_actuals, exo_list)
@@ -299,7 +321,16 @@ forecast_tab <- data.frame(
 )
 n_actual_q <- nrow(forecast_tab)                          # was 25
 
-fts <- forecast_tab %>%
+## Future quarters through the horizon (was rows 26:48)
+future_quarters <- seq(from = last_actual_yq + 1/4, to = horizon_end_yq, by = 1/4)
+forecast_tab <- bind_rows(
+  forecast_tab,
+  data.frame(Year_Quarter = future_quarters, Actual = NA_real_)
+)
+
+if (run_sales_ratio) {
+
+fts <- forecast_tab[seq_len(n_actual_q), ] %>%
   mutate(
     Year    = as.numeric(format(Year_Quarter, "%Y")),
     Quarter = paste0("Q", format(Year_Quarter, "%q"))
@@ -370,9 +401,7 @@ if (forecast_steps > 0) {
   forecast_tab_annual <- bind_rows(forecast_tab_annual, future_annual)
 }
 
-## Extend the quarterly table through the horizon (was rows 26:48)
-future_quarters <- seq(from = last_actual_yq + 1/4, to = horizon_end_yq, by = 1/4)
-
+## Extend the quarterly table through the horizon
 fts_future <- data.frame(Year_Quarter = future_quarters) %>%
   mutate(
     Actual  = NA_real_,
@@ -400,12 +429,10 @@ for (i in (n_actual_q + 1):nrow(fts)) {
   }
 }
 
-## Collect Method A into forecast_tab (actuals + future quarters)
-forecast_tab <- bind_rows(
-  forecast_tab,
-  data.frame(Year_Quarter = future_quarters, Actual = NA_real_)
-)
+## Collect Method A into forecast_tab
 forecast_tab$avg_sales_ratio <- fts$Total_forecast
+
+}  # end if (run_sales_ratio)
 
 ###############################################################################
 # 4. METHOD B -- MULTIPLE REGRESSION ON EXOGENOUS DRIVERS
@@ -416,6 +443,8 @@ data$dummy_break <- 0
 if (has_breaks) {
   data$dummy_break[data$Year_Quarter %in% break_dates] <- 1   # was rows 214/244/293
 }
+
+if (run_multi_reg) {
 
 ## Training sample: actual quarters, excluding the incomplete final year
 ## (was: drop_na(Total_Revenue) %>% filter(year < 2026))
@@ -441,12 +470,20 @@ data$multireg_target[future_rows] <- reg_forecast
 forecast_tab$multi_reg <- data$multireg_target[
   (first_row_actual + last_break_row_sub - 1):last_row_forecast]
 
+}  # end if (run_multi_reg)
+
 ###############################################################################
-# 5. ENSEMBLE FORECAST
+# 5. FINAL FORECAST (ensemble when both methods are active)
 ###############################################################################
 
-w <- config$weight_sales_ratio
-forecast_tab$avg <- w * forecast_tab$avg_sales_ratio + (1 - w) * forecast_tab$multi_reg
+if (run_sales_ratio && run_multi_reg) {
+  w <- config$weight_sales_ratio
+  forecast_tab$avg <- w * forecast_tab$avg_sales_ratio + (1 - w) * forecast_tab$multi_reg
+} else if (run_sales_ratio) {
+  forecast_tab$avg <- forecast_tab$avg_sales_ratio
+} else {
+  forecast_tab$avg <- forecast_tab$multi_reg
+}
 
 ## Write the combined forecast back into the master data
 future_rows_tab <- (n_actual_q + 1):nrow(forecast_tab)
@@ -481,7 +518,9 @@ if (!is.null(components)) {
 data <- add_fiscal_year(data, config$fy_start_quarter)
 data_final <- data
 
-data_drivers <- data_final[, c("F_Year", "F_quarter", config$driver_vars,
+# driver_vars may be NULL (sales-ratio-only streams)
+driver_cols  <- intersect(as.character(config$driver_vars), colnames(data_final))
+data_drivers <- data_final[, c("F_Year", "F_quarter", driver_cols,
                                "dummy_break", "quarter")]
 
 target_by_F_year <- data_final %>%
@@ -511,7 +550,8 @@ if (!is.null(config$prev_forecast_dir)) {
   data_prev <- build_quarterly_data(q_prev, exo_prev)
   data_prev <- add_fiscal_year(data_prev, config$fy_start_quarter)
 
-  data_drivers_old <- data_prev[, c("F_Year", "F_quarter", config$driver_vars, "quarter")]
+  prev_driver_cols <- intersect(as.character(config$driver_vars), colnames(data_prev))
+  data_drivers_old <- data_prev[, c("F_Year", "F_quarter", prev_driver_cols, "quarter")]
   write_xlsx(data_drivers_old, in_path(paste0(out_prefix, "data_drivers_old.xlsx")))
 }
 
