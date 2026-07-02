@@ -32,7 +32,8 @@ forecast_script <- "generalized_revenue_forecast.R"
 # SHARED SETTINGS -- everything that is the same for all streams
 ###############################################################################
 
-base_dir <- "C:/Users/AbdelmoumineT105/OneDrive - Washington State Executive Branch Agencies/Desktop/2024 -mid 2025/R_DFI/Securities Forecast/Jun_2026_forecast"
+base_dir      <- "C:/Users/AbdelmoumineT105/OneDrive - Washington State Executive Branch Agencies/Desktop/2024 -mid 2025/R_DFI/Securities Forecast/Jun_2026_forecast"
+prev_base_dir <- "C:/Users/AbdelmoumineT105/OneDrive - Washington State Executive Branch Agencies/Desktop/2024 -mid 2025/R_DFI/Securities Forecast/Feb_2026_forecast"
 
 shared <- list(
   forecast_dir  = base_dir,
@@ -46,8 +47,18 @@ shared <- list(
   n_ratio_years      = 2,
   weight_sales_ratio = 0.5,
   fy_start_quarter   = 3,
-  prev_forecast_dir  = NULL,   # set per stream (or here) to export old drivers
-  make_plots         = FALSE   # keep FALSE in batch runs
+
+  ## previous forecast round: each stream exports its old drivers for
+  ## comparison (<prefix>data_drivers_old.xlsx). To skip this for a stream,
+  ## override with  prev_forecast_dir = NULL  in that stream's entry.
+  prev_forecast_dir    = prev_base_dir,
+  prev_actuals_file    = "Actuals.xlsx",   # override per stream if it differs
+  prev_exogenous_files = list(
+    list(file = "BC0126.xlsx",  sheet = 1, skip = 1),
+    list(file = "BC0126W.xlsx", sheet = 1, skip = 1)
+  ),
+
+  make_plots = FALSE   # keep FALSE in batch runs
 )
 
 ###############################################################################
@@ -71,6 +82,7 @@ streams <- list(
   #     target_col     = "Total Revenue",
   #     driver_vars    = c("yp_wa", "savper"),
   #     actuals_frequency = "quarterly",           # already quarterly: no aggregation
+  #     prev_actuals_file = "Actuals_consumer.xlsx",  # this stream's old actuals
   #     output_prefix  = "consumer_"
   # ))
   #
