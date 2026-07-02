@@ -122,7 +122,12 @@ shared <- list(
   exogenous_files = list(...),      # same driver files for all streams
   horizon_end = "2031 Q4", n_ratio_years = 2,
   weight_sales_ratio = 0.5, fy_start_quarter = 3,
-  prev_forecast_dir = NULL, make_plots = FALSE, actuals_sheet = 1
+  # previous round (old-driver export); override prev_forecast_dir = NULL
+  # in a stream's entry to skip it for that stream
+  prev_forecast_dir    = prev_base_dir,
+  prev_actuals_file    = "Actuals.xlsx",
+  prev_exogenous_files = list(...), # previous round's driver files
+  make_plots = FALSE, actuals_sheet = 1
 )
 
 streams <- list(
