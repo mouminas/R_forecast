@@ -191,17 +191,16 @@ build_quarterly_data <- function(q_actuals, exo_list) {
 
 # Add fiscal-year columns. fy_start_quarter = calendar quarter in which the
 # fiscal year begins (3 -> FY runs Jul..Jun, the WA state convention).
+# (base R on purpose: packages like MASS - pulled in by car/caret/plm -
+# mask dplyr::select, which breaks piped select() calls in mixed sessions)
 add_fiscal_year <- function(data, fy_start_quarter) {
-  data %>%
-    mutate(
-      q_int     = as.integer(as.character(quarter)),
-      C_Year    = year,
-      F_Year    = ifelse(q_int >= fy_start_quarter, C_Year + 1, C_Year),
-      F_quarter = ifelse(q_int >= fy_start_quarter,
-                         q_int - fy_start_quarter + 1,
-                         q_int + (4 - fy_start_quarter) + 1)
-    ) %>%
-    select(-q_int)
+  q_int <- as.integer(as.character(data$quarter))
+  data$C_Year    <- data$year
+  data$F_Year    <- ifelse(q_int >= fy_start_quarter, data$year + 1, data$year)
+  data$F_quarter <- ifelse(q_int >= fy_start_quarter,
+                           q_int - fy_start_quarter + 1,
+                           q_int + (4 - fy_start_quarter) + 1)
+  data
 }
 
 ###############################################################################
