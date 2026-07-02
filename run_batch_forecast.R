@@ -80,7 +80,8 @@ streams <- list(
   #     actuals_file   = "Actuals_consumer.xlsx",
   #     component_cols = NULL,                     # single-column series
   #     target_col     = "Total Revenue",
-  #     driver_vars    = c("yp_wa", "savper"),
+  #     driver_vars    = NULL,                     # not needed: sales ratio only
+  #     methods        = "sales_ratio",            # skip the regression method
   #     actuals_frequency = "quarterly",           # already quarterly: no aggregation
   #     prev_actuals_file = "Actuals_consumer.xlsx",  # this stream's old actuals
   #     output_prefix  = "consumer_"

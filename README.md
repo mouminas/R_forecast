@@ -78,7 +78,12 @@ config <- list(
 
   horizon_end        = "2031 Q4",  # NULL = last quarter of the driver files
   n_ratio_years      = 2,          # complete years used for ratio averaging
-  weight_sales_ratio = 0.5,        # ensemble weight on Method A
+
+  # which methods to run: "sales_ratio", "multi_reg", or both (the default).
+  # With one method, it alone is the final forecast; driver_vars is only
+  # needed when "multi_reg" is active.
+  methods            = c("sales_ratio", "multi_reg"),
+  weight_sales_ratio = 0.5,        # ensemble weight on Method A (both active)
   fy_start_quarter   = 3,          # 3 = July (WA state); 4 = October (federal)
 
   # previous forecast round (driver comparison); NULL to skip
@@ -157,7 +162,8 @@ streams), writes its own prefixed outputs (`securities_data_final.xlsx`,
 `combined_forecasts.xlsx` is written with one column per stream — by fiscal
 year (including an `All_Streams` grand total) and by quarter. Streams can
 differ in anything the config supports: different actuals files, monthly or
-quarterly frequency, components (or none), drivers, ensemble weights, or
+quarterly frequency, components (or none), drivers, methods (e.g. one stream
+sales-ratio-only, another with the full ensemble), ensemble weights, or
 horizons.
 
 ## Requirements
