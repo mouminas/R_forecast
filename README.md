@@ -10,9 +10,11 @@ This repository contains two versions of the same forecasting methodology:
 
 ## Methodology (unchanged from the original)
 
-1. **Data preparation** — monthly actuals are aggregated to quarters and merged
-   with quarterly exogenous driver files (e.g. ERFC `BCxxxx` / `BCxxxxW`
-   workbooks, which carry driver projections through the forecast horizon).
+1. **Data preparation** — actuals are brought to quarterly form (monthly files
+   are aggregated to quarters; files that are already quarterly are used
+   as-is, see `actuals_frequency`) and merged with quarterly exogenous driver
+   files (e.g. ERFC `BCxxxx` / `BCxxxxW` workbooks, which carry driver
+   projections through the forecast horizon).
 2. **Structural breaks** — the target series is STL-decomposed and
    `strucchange::breakpoints()` is run on `level ~ trend + quarter`. The sample
    after the last break is used for estimation (if no break is found, the full
@@ -48,9 +50,13 @@ config <- list(
   # where the input files live and outputs are written
   forecast_dir  = "path/to/this/forecast/round",
 
-  # monthly actuals: must contain a `Year:Quarter` column ("YYYY:Qq")
+  # actuals: must contain a `Year:Quarter` column ("YYYY:Qq")
   actuals_file  = "Actuals.xlsx",
   actuals_sheet = 1,
+
+  # "monthly" = sum rows into quarters; "quarterly" = the file is already
+  # one row per quarter, use it without aggregation
+  actuals_frequency = "monthly",
 
   # any number of quarterly driver files; first column is a date whose
   # quarter-start months are 01/04/07/10; must extend through the horizon
@@ -133,6 +139,7 @@ streams <- list(
     component_cols = NULL,
     target_col     = "Total Revenue",
     driver_vars    = c("yp_wa", "savper"),
+    actuals_frequency = "quarterly",   # already quarterly: no aggregation
     output_prefix  = "consumer_"
   ))
   # ... add as many streams as needed
@@ -144,8 +151,9 @@ streams), writes its own prefixed outputs (`securities_data_final.xlsx`,
 `consumer_forecast_tab.xlsx`, ...), and at the end a single
 `combined_forecasts.xlsx` is written with one column per stream — by fiscal
 year (including an `All_Streams` grand total) and by quarter. Streams can
-differ in anything the config supports: different actuals files, components
-(or none), drivers, ensemble weights, or horizons.
+differ in anything the config supports: different actuals files, monthly or
+quarterly frequency, components (or none), drivers, ensemble weights, or
+horizons.
 
 ## Requirements
 
