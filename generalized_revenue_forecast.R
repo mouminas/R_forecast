@@ -109,7 +109,12 @@ if (!exists("config")) config <- list(
   ),
 
   # Show diagnostic plots (breakpoint plot etc.)
-  make_plots = TRUE
+  make_plots = TRUE,
+
+  # Prefix for the output files (e.g. "securities_"), so several revenue
+  # streams can write into the same forecast_dir without overwriting each
+  # other. "" keeps the original file names.
+  output_prefix = ""
 )
 
 ###############################################################################
@@ -464,9 +469,11 @@ target_by_F_year <- data_final %>%
   summarise(!!target := sum(.data[[target]]), .groups = "drop")
 print(as.data.frame(target_by_F_year))
 
-write_xlsx(data_final,   in_path("data_final.xlsx"))
-write_xlsx(data_drivers, in_path("data_drivers.xlsx"))
-write_xlsx(forecast_tab, in_path("forecast_tab.xlsx"))
+out_prefix <- if (!is.null(config$output_prefix)) config$output_prefix else ""
+
+write_xlsx(data_final,   in_path(paste0(out_prefix, "data_final.xlsx")))
+write_xlsx(data_drivers, in_path(paste0(out_prefix, "data_drivers.xlsx")))
+write_xlsx(forecast_tab, in_path(paste0(out_prefix, "forecast_tab.xlsx")))
 
 ###############################################################################
 # 8. OPTIONAL -- DRIVERS FROM THE PREVIOUS FORECAST ROUND (for comparison)
@@ -484,7 +491,7 @@ if (!is.null(config$prev_forecast_dir)) {
   data_prev <- add_fiscal_year(data_prev, config$fy_start_quarter)
 
   data_drivers_old <- data_prev[, c("F_Year", "F_quarter", config$driver_vars, "quarter")]
-  write_xlsx(data_drivers_old, in_path("data_drivers_old.xlsx"))
+  write_xlsx(data_drivers_old, in_path(paste0(out_prefix, "data_drivers_old.xlsx")))
 }
 
 cat("\nForecast complete:", target, "through", format(horizon_end_yq), "\n")

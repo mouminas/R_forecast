@@ -6,6 +6,7 @@ This repository contains two versions of the same forecasting methodology:
 |---|---|
 | `current_version` | Original script, hardwired to the securities revenue forecast (June 2026 round) |
 | `generalized_revenue_forecast.R` | Generalized script — same methodology, applicable to **any quarterly revenue series** |
+| `run_batch_forecast.R` | Batch runner — forecasts **several revenue streams in one run** using the generalized script |
 
 ## Methodology (unchanged from the original)
 
@@ -102,6 +103,49 @@ data or the config:
 | Last-2-years ratio averaging | `n_ratio_years` |
 | 50/50 ensemble | `weight_sales_ratio` |
 | July–June fiscal year | `fy_start_quarter` |
+
+## Forecasting several revenue streams in one run
+
+Use `run_batch_forecast.R` instead of running the single-series script once
+per stream. Define the settings shared by all streams once, then list only
+the per-stream differences:
+
+```r
+shared <- list(
+  forecast_dir  = base_dir,
+  exogenous_files = list(...),      # same driver files for all streams
+  horizon_end = "2031 Q4", n_ratio_years = 2,
+  weight_sales_ratio = 0.5, fy_start_quarter = 3,
+  prev_forecast_dir = NULL, make_plots = FALSE, actuals_sheet = 1
+)
+
+streams <- list(
+  securities = modifyList(shared, list(
+    actuals_file   = "Actuals.xlsx",
+    component_cols = c("Total Registrations", "Total Exemptions & Opinions",
+                       "Total Licensing", "Total Fran. & Bus Op."),
+    target_col     = "Total Revenue",
+    driver_vars    = c("wl5000", "yp_wa", "csvfinfee", "savper", "lcbcai"),
+    output_prefix  = "securities_"
+  )),
+  consumer_services = modifyList(shared, list(
+    actuals_file   = "Actuals_consumer.xlsx",
+    component_cols = NULL,
+    target_col     = "Total Revenue",
+    driver_vars    = c("yp_wa", "savper"),
+    output_prefix  = "consumer_"
+  ))
+  # ... add as many streams as needed
+)
+```
+
+Each stream runs in its own clean R environment (no leakage between
+streams), writes its own prefixed outputs (`securities_data_final.xlsx`,
+`consumer_forecast_tab.xlsx`, ...), and at the end a single
+`combined_forecasts.xlsx` is written with one column per stream — by fiscal
+year (including an `All_Streams` grand total) and by quarter. Streams can
+differ in anything the config supports: different actuals files, components
+(or none), drivers, ensemble weights, or horizons.
 
 ## Requirements
 
