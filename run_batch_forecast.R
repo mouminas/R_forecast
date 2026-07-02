@@ -37,6 +37,7 @@ base_dir <- "C:/Users/AbdelmoumineT105/OneDrive - Washington State Executive Bra
 shared <- list(
   forecast_dir  = base_dir,
   actuals_sheet = 1,
+  actuals_frequency = "monthly",   # override per stream if already quarterly
   exogenous_files = list(
     list(file = "BC0526.xlsx",  sheet = 1, skip = 1),
     list(file = "BC0526W.xlsx", sheet = 1, skip = 1)
@@ -69,6 +70,7 @@ streams <- list(
   #     component_cols = NULL,                     # single-column series
   #     target_col     = "Total Revenue",
   #     driver_vars    = c("yp_wa", "savper"),
+  #     actuals_frequency = "quarterly",           # already quarterly: no aggregation
   #     output_prefix  = "consumer_"
   # ))
   #

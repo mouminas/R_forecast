@@ -8,8 +8,9 @@
 # from the data itself, so the same code can forecast ANY revenue series.
 #
 # Methodology (same as the original):
-#   1. Load monthly actuals, aggregate to quarterly, merge with the
-#      quarterly exogenous driver files (e.g. ERFC BCxxxx / BCxxxxW).
+#   1. Load the actuals (monthly, aggregated to quarterly - or already
+#      quarterly, see actuals_frequency), merge with the quarterly
+#      exogenous driver files (e.g. ERFC BCxxxx / BCxxxxW).
 #   2. STL-decompose the target series and detect structural breaks
 #      (breakpoints on level ~ trend + quarter). Keep the post-break sample.
 #   3. Method A - "sales ratio" rule of thumb:
@@ -57,10 +58,14 @@ if (!exists("config")) config <- list(
   # Folder of the current forecast round (all inputs read / outputs written here)
   forecast_dir  = "C:/Users/AbdelmoumineT105/OneDrive - Washington State Executive Branch Agencies/Desktop/2024 -mid 2025/R_DFI/Securities Forecast/Jun_2026_forecast",
 
-  # Monthly actuals workbook. Must contain a `Year:Quarter` column
-  # (format "YYYY:Qq") plus the component columns below.
+  # Actuals workbook. Must contain a `Year:Quarter` column (format "YYYY:Qq")
+  # plus the component columns below.
   actuals_file  = "Actuals.xlsx",
   actuals_sheet = 1,
+
+  # Frequency of the actuals file: "monthly" (rows are summed into quarters)
+  # or "quarterly" (data is already one row per quarter; no aggregation).
+  actuals_frequency = "monthly",
 
   # Quarterly exogenous driver workbooks (any number of them). Their first
   # column is a date like "YYYY-MM-..." with quarter-start months 01/04/07/10.
@@ -141,20 +146,31 @@ read_exogenous <- function(path, sheet = 1, skip = 1) {
   x
 }
 
-# Aggregate the monthly actuals to quarterly and build the target series
-aggregate_actuals <- function(m_actuals, component_cols, target_col) {
-  if (!is.null(component_cols)) {
+# Bring the actuals to quarterly form and build the target series.
+# frequency = "monthly": rows are summed into quarters (the original behavior).
+# frequency = "quarterly": the file is already one row per quarter, so it is
+# used as-is (only validated), no aggregation.
+aggregate_actuals <- function(m_actuals, component_cols, target_col,
+                              frequency = "monthly") {
+  value_cols <- if (!is.null(component_cols)) component_cols else target_col
+
+  if (frequency == "quarterly") {
+    if (any(duplicated(m_actuals$`Year:Quarter`))) {
+      stop("actuals_frequency = \"quarterly\" but the actuals file has more ",
+           "than one row per Year:Quarter - use \"monthly\" instead.")
+    }
+    q <- m_actuals[, c("Year:Quarter", value_cols)]
+  } else if (frequency == "monthly") {
     q <- m_actuals %>%
       group_by(`Year:Quarter`) %>%
-      summarise(across(all_of(component_cols), ~ sum(.x, na.rm = FALSE)),
+      summarise(across(all_of(value_cols), ~ sum(.x, na.rm = FALSE)),
                 .groups = "drop")
-    q[[target_col]] <- rowSums(q[, component_cols])
   } else {
-    q <- m_actuals %>%
-      group_by(`Year:Quarter`) %>%
-      summarise(across(all_of(target_col), ~ sum(.x, na.rm = FALSE)),
-                .groups = "drop")
+    stop("actuals_frequency must be \"monthly\" or \"quarterly\", got: ",
+         frequency)
   }
+
+  if (!is.null(component_cols)) q[[target_col]] <- rowSums(q[, component_cols])
   q
 }
 
@@ -199,7 +215,12 @@ m_actuals <- read_excel(in_path(config$actuals_file), sheet = config$actuals_she
 exo_list <- lapply(config$exogenous_files, function(e)
   read_exogenous(in_path(e$file), sheet = e$sheet, skip = e$skip))
 
-q_actuals <- aggregate_actuals(m_actuals, config$component_cols, config$target_col)
+# Default to "monthly" so older configs without the field keep working
+actuals_freq <- if (!is.null(config$actuals_frequency))
+  config$actuals_frequency else "monthly"
+
+q_actuals <- aggregate_actuals(m_actuals, config$component_cols,
+                               config$target_col, actuals_freq)
 data      <- build_quarterly_data(q_actuals, exo_list)
 
 # Cleaned names of the target and component columns (as they exist in `data`)
@@ -486,7 +507,8 @@ if (!is.null(config$prev_forecast_dir)) {
   exo_prev <- lapply(config$prev_exogenous_files, function(e)
     read_exogenous(prev_path(e$file), sheet = e$sheet, skip = e$skip))
 
-  q_prev    <- aggregate_actuals(m_prev, config$component_cols, config$target_col)
+  q_prev    <- aggregate_actuals(m_prev, config$component_cols,
+                                 config$target_col, actuals_freq)
   data_prev <- build_quarterly_data(q_prev, exo_prev)
   data_prev <- add_fiscal_year(data_prev, config$fy_start_quarter)
 
