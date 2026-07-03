@@ -7,6 +7,7 @@ This repository contains two versions of the same forecasting methodology:
 | `current_version` | Original script, hardwired to the securities revenue forecast (June 2026 round) |
 | `generalized_revenue_forecast.R` | Generalized script — same methodology, applicable to **any quarterly revenue series** |
 | `run_batch_forecast.R` | Batch runner — forecasts **several revenue streams in one run** using the generalized script |
+| `driver_selection.R` | Finds the **best set of drivers** for a stream's multi-regression, judged out of sample on a train/test split |
 
 ## Methodology (unchanged from the original)
 
@@ -165,6 +166,36 @@ differ in anything the config supports: different actuals files, monthly or
 quarterly frequency, components (or none), drivers, methods (e.g. one stream
 sales-ratio-only, another with the full ensemble), ensemble weights, or
 horizons.
+
+## Finding the best drivers for a stream
+
+`driver_selection.R` answers "which drivers should `driver_vars` contain?"
+for any revenue stream. It shares the forecast script's data pipeline and
+config style (inject a `config` list before `source()` to run it
+programmatically, e.g. in a loop over streams):
+
+1. Builds the quarterly dataset from the actuals and driver files.
+2. Detects structural breaks in the stream (same STL + `breakpoints()`
+   approach as the forecast) and creates a pulse dummy at the break dates.
+3. Splits the actual quarters chronologically into a training window
+   (`train_share`, default 80%, or an explicit `train_end = "YYYY Qq"`) and
+   a held-out test window.
+4. Fits `target ~ drivers + dummy_break + factor(quarter)` (quarter fixed
+   effects) on the training window for **every combination** of candidate
+   drivers up to `max_drivers`, and forecasts the test window.
+   Candidates come from `candidate_drivers`, or with `NULL` every numeric
+   column of the driver files (columns with gaps or no variation over the
+   actual window are dropped automatically).
+5. Ranks all models (plus a no-driver quarter-FE baseline) by test RMSE
+   — also reporting MAE, MAPE and train adjusted R² — prints the top
+   models, refits the winner on the full actual sample, and writes
+   `driver_selection_results.xlsx` (ranking, best-model coefficients,
+   split settings).
+
+The winning set is printed ready to paste into the forecast config:
+`driver_vars = c("wl5000", "yp_wa")`. Check the coefficient sheet before
+adopting it: a driver that helps test RMSE but has an insignificant
+coefficient in the full-sample refit is usually worth dropping.
 
 ## Requirements
 
