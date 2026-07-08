@@ -28,10 +28,12 @@
 # the same way run_batch_forecast.R does.
 ###############################################################################
 
-### clear the space (skipped when a config is supplied externally)
-if (!exists("config")) {
+### clear the space. A direct run always rebuilds config from the CONFIG
+### block below; an external caller injecting `config` must set
+### .config_injected <- TRUE to keep it (see generalized_revenue_forecast.R).
+if (!isTRUE(get0(".config_injected", ifnotfound = FALSE))) {
   cat("\014")
-  rm(list = ls(all.names = TRUE))
+  rm(list = setdiff(ls(all.names = TRUE), ".config_injected"))
 }
 
 ### Load the packages

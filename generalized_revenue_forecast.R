@@ -37,9 +37,14 @@
 ###############################################################################
 
 ### clear the space (skipped when a config is supplied externally)
-if (!exists("config")) {
+# A direct/interactive run ALWAYS rebuilds config from the CONFIG block below
+# (so edits are picked up on re-source without restarting R). An external
+# caller that injects its own `config` must signal it with
+#   .config_injected <- TRUE
+# (run_batch_forecast.R does this); that skips the clear and the default block.
+if (!isTRUE(get0(".config_injected", ifnotfound = FALSE))) {
   cat("\014")
-  rm(list = ls(all.names = TRUE))
+  rm(list = setdiff(ls(all.names = TRUE), ".config_injected"))
 }
 
 ### Load the packages
@@ -228,6 +233,19 @@ add_fiscal_year <- function(data, fy_start_quarter) {
 ###############################################################################
 
 in_path <- function(f) file.path(config$forecast_dir, f)
+
+## Startup banner - confirms which settings are actually in effect (so a
+## stale session or an ignored config edit is immediately obvious).
+.cfg_show <- function(field, default) if (!is.null(config[[field]]))
+  paste(config[[field]], collapse = ", ") else default
+cat("\n--- generalized_revenue_forecast: active settings ---\n")
+cat("  config source :", if (isTRUE(get0(".config_injected", ifnotfound = FALSE)))
+      "external (injected)" else "CONFIG block in this file", "\n")
+cat("  target_col    :", config$target_col, "\n")
+cat("  methods       :", .cfg_show("methods", "sales_ratio, multi_reg"), "\n")
+cat("  trend_method  :", .cfg_show("trend_method", "damped (default)"), "\n")
+cat("  damping_phi   :", .cfg_show("damping_phi", "0.9 (default)"), "\n")
+cat("  horizon_end   :", .cfg_show("horizon_end", "(driver-file end)"), "\n\n")
 
 m_actuals <- read_excel(in_path(config$actuals_file), sheet = config$actuals_sheet)
 

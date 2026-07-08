@@ -108,6 +108,7 @@ run_one_stream <- function(name, cfg) {
   cat("=============================================================\n")
   env <- new.env(parent = globalenv())
   env$config <- cfg
+  env$.config_injected <- TRUE      # keep our config; skip the file's CONFIG block
   source(forecast_script, local = env)
   list(
     name           = name,

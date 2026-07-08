@@ -47,9 +47,22 @@ This repository contains two versions of the same forecasting methodology:
 
 ## How to apply it to a new series
 
-Edit only the `config` block at the top of `generalized_revenue_forecast.R`
-(or define a list named `config` before `source()`-ing the file — the built-in
-defaults are then skipped):
+Edit only the `config` block at the top of `generalized_revenue_forecast.R`,
+then `source()` the file. Every direct run rebuilds `config` from that block,
+so **edits are picked up on re-source without restarting R**. The script
+prints an "active settings" banner at the top of each run (config source,
+trend method, damping φ, methods, horizon) so you can confirm your edit took
+effect.
+
+To drive the script programmatically instead (e.g. in a loop), define a list
+named `config` **and** set `.config_injected <- TRUE` before `source()`-ing —
+that keeps your injected config and skips the file's default block:
+
+```r
+config <- list(...)
+.config_injected <- TRUE
+source("generalized_revenue_forecast.R")
+```
 
 ```r
 config <- list(
@@ -178,8 +191,8 @@ horizons.
 
 `driver_selection.R` answers "which drivers should `driver_vars` contain?"
 for any revenue stream. It shares the forecast script's data pipeline and
-config style (inject a `config` list before `source()` to run it
-programmatically, e.g. in a loop over streams):
+config style (inject a `config` list plus `.config_injected <- TRUE` before
+`source()` to run it programmatically, e.g. in a loop over streams):
 
 1. Builds the quarterly dataset from the actuals and driver files.
 2. Detects structural breaks in the stream (same STL + `breakpoints()`
