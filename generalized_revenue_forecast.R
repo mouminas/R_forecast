@@ -14,9 +14,10 @@
 #   2. STL-decompose the target series and detect structural breaks
 #      (breakpoints on level ~ trend + quarter). Keep the post-break sample.
 #   3. Method A - "sales ratio" rule of thumb:
-#        annual totals of the post-break sample -> centered-trend linear
-#        regression -> annual forecasts; quarterly path from the average
-#        cumulative within-year sales ratios of the last N complete years.
+#        annual totals of the post-break sample -> trend model (damped-trend
+#        exponential smoothing by default, or linear; see trend_method) ->
+#        annual forecasts; quarterly path from the average cumulative
+#        within-year sales ratios of the last N complete years.
 #        If the last actual year is incomplete, its annual total is
 #        estimated as cum_sales / cum_sales_ratio at the last actual quarter.
 #   4. Method B - multiple regression of the target on the exogenous
@@ -99,6 +100,16 @@ if (!exists("config")) config <- list(
   # Number of most recent COMPLETE years used to average the quarterly
   # sales ratios and the component shares (original code used 2).
   n_ratio_years = 2,
+
+  # How the sales-ratio method extrapolates the annual totals:
+  #   "damped" - damped-trend exponential smoothing (trend flattens over
+  #              time; avoids the runaway values a straight line gives far out)
+  #   "linear" - the original centered-trend OLS straight-line extrapolation
+  trend_method = "damped",
+
+  # Damping factor phi for trend_method = "damped", in (0, 1]. Smaller = the
+  # trend flattens faster; phi = 1 reproduces the linear trend. Typical: 0.8-0.98.
+  damping_phi = 0.9,
 
   # Which forecasting methods to run: "sales_ratio", "multi_reg", or both.
   # With both, the final forecast is the weighted average below; with a
@@ -373,31 +384,54 @@ if (!last_year_complete) {
     fts$cum_sales[i_last] / fts$cum_sales_ratio_forecast[i_last]
 }
 
-## Centered-trend linear regression on the annual totals
-n_obs <- nrow(forecast_tab_annual)
-if (n_obs %% 2 == 0) {
-  trend_centered <- seq(from = -(n_obs - 1), to = n_obs - 1, by = 2)
-  trend_step <- 2
-} else {
-  trend_centered <- seq(from = -(n_obs - 1) / 2, to = (n_obs - 1) / 2, by = 1)
-  trend_step <- 1
+## Project the annual totals to the horizon.
+## trend_method = "damped" (default): damped-trend exponential smoothing -
+##   the trend keeps its direction but flattens over time instead of being
+##   extrapolated in a straight line forever (Gardner & McKenzie); this
+##   curbs the runaway growth/decline a pure linear trend produces far out.
+## trend_method = "linear": the original centered-trend OLS extrapolation.
+trend_method <- if (!is.null(config$trend_method)) config$trend_method else "damped"
+
+# annual totals of the actual years (already includes the partial-year
+# estimate applied just above), oldest -> newest
+annual_hist <- forecast_tab_annual$Annual_Revenue
+
+# Fit the same centered-trend OLS the original used, then extrapolate.
+# "linear": each future year adds the full per-year slope b (straight line).
+# "damped": the h-step-ahead increment is b*(phi + phi^2 + ... + phi^h), so
+#   the year-over-year change shrinks geometrically and the trend flattens.
+#   phi = 1 reproduces the linear trend exactly; smaller phi flattens faster.
+# (A short post-break annual sample - typically 6-8 points - is too small for
+#  Holt's method to *estimate* phi, so phi is taken from the config instead.)
+project_annual <- function(hist, steps, method, phi) {
+  n <- length(hist)
+  if (n %% 2 == 0) { tc <- seq(-(n - 1), n - 1, by = 2); step <- 2 }
+  else             { tc <- seq(-(n - 1) / 2, (n - 1) / 2, by = 1); step <- 1 }
+  cf          <- coef(lm(hist ~ tc))
+  b_year      <- cf[2] * step               # trend per year
+  fitted_last <- cf[1] + cf[2] * max(tc)     # fitted value at the last year
+  h <- seq_len(steps)
+  mult <- if (method == "damped") cumsum(phi ^ h) else h
+  as.numeric(fitted_last + b_year * mult)
 }
-forecast_tab_annual$trend_centered <- trend_centered
 
-annual_model <- lm(Annual_Revenue ~ trend_centered, data = forecast_tab_annual)
-coeffmodel   <- coef(annual_model)
+damping_phi <- if (!is.null(config$damping_phi)) config$damping_phi else 0.9
+if (trend_method == "damped" && (damping_phi <= 0 || damping_phi > 1)) {
+  stop("damping_phi must be in (0, 1]; got ", damping_phi)
+}
 
-## Extend the annual table through the horizon (was forecast_steps <- 5)
 horizon_year   <- as.integer(format(horizon_end_yq, "%Y"))
 forecast_steps <- horizon_year - max(forecast_tab_annual$Year)
 
 if (forecast_steps > 0) {
+  if (!trend_method %in% c("damped", "linear")) {
+    stop('trend_method must be "damped" or "linear", got: ', trend_method)
+  }
   future_annual <- data.frame(
     Year           = max(forecast_tab_annual$Year) + seq_len(forecast_steps),
-    Annual_Revenue = NA_real_,
-    trend_centered = max(forecast_tab_annual$trend_centered) + trend_step * seq_len(forecast_steps)
+    Annual_Revenue = project_annual(annual_hist, forecast_steps,
+                                    trend_method, damping_phi)
   )
-  future_annual$Annual_Revenue <- coeffmodel[1] + coeffmodel[2] * future_annual$trend_centered
   forecast_tab_annual <- bind_rows(forecast_tab_annual, future_annual)
 }
 

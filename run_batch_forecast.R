@@ -45,6 +45,8 @@ shared <- list(
   ),
   horizon_end        = "2031 Q4",
   n_ratio_years      = 2,
+  trend_method       = "damped",   # "damped" (flattens) or "linear"
+  damping_phi        = 0.9,        # damped-trend flattening factor; 1 = linear
   weight_sales_ratio = 0.5,
   fy_start_quarter   = 3,
 
