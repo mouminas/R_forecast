@@ -21,11 +21,16 @@ This repository contains two versions of the same forecasting methodology:
    after the last break is used for estimation (if no break is found, the full
    sample is used).
 3. **Method A — sales-ratio rule of thumb** — annual totals of the post-break
-   sample are regressed on a centered linear trend to project annual revenue;
-   the quarterly path is derived from average *cumulative* within-year sales
-   ratios over the last N complete years. If the latest year is incomplete,
-   its annual total is estimated as `cumulative sales / cumulative sales ratio`
-   at the last actual quarter.
+   sample are projected forward with a trend model (`trend_method`): a
+   **damped trend** by default, which keeps the trend's direction but flattens
+   it over time (the year-over-year increment shrinks by a factor `damping_phi`
+   each year) so long-horizon forecasts don't run away, or the original
+   **linear** centered-trend regression (equivalently `damping_phi = 1`). The
+   quarterly
+   path is derived from average *cumulative* within-year sales ratios over the
+   last N complete years. If the latest year is incomplete, its annual total
+   is estimated as `cumulative sales / cumulative sales ratio` at the last
+   actual quarter.
 4. **Method B — multiple regression** — the target is regressed on the
    exogenous drivers, pulse dummies at the detected break dates, and quarter
    dummies; the fitted model predicts the future quarters using the projected
@@ -79,6 +84,8 @@ config <- list(
 
   horizon_end        = "2031 Q4",  # NULL = last quarter of the driver files
   n_ratio_years      = 2,          # complete years used for ratio averaging
+  trend_method       = "damped",   # annual-trend extrapolation: "damped" or "linear"
+  damping_phi        = 0.9,        # damped-trend flattening factor in (0,1]; 1 = linear
 
   # which methods to run: "sales_ratio", "multi_reg", or both (the default).
   # With one method, it alone is the final forecast; driver_vars is only
@@ -204,11 +211,13 @@ install.packages(c("readxl", "writexl", "dplyr", "tidyr",
                    "stringr", "zoo", "strucchange"))
 ```
 
-(The generalized script no longer needs `lightgbm`, `vars`, `caret`, `plm`,
-`fable`, etc. — only the packages actually used by the methodology.)
+The generalized script no longer needs `lightgbm`, `vars`, `caret`, `plm`,
+`fable`, etc. — only the packages actually used by the methodology. (The
+damped trend is computed directly, so no extra package is required.)
 
 ## To reproduce the June 2026 securities forecast
 
-The default `config` in `generalized_revenue_forecast.R` is set to the same
-inputs as `current_version` (June 2026 securities round), so running it
-unchanged reproduces that forecast.
+The default `config` in `generalized_revenue_forecast.R` uses the same inputs
+as `current_version` (June 2026 securities round). Note the annual trend now
+defaults to `trend_method = "damped"`; set `trend_method = "linear"` to
+reproduce the original straight-line extrapolation exactly.
